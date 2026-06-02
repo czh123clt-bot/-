@@ -8,6 +8,8 @@ interface RubiksCubeProps {
   onRotationEnd?: (newState: CubeState) => void;
   trickActive: boolean;
   onFaceHidden?: (faceName: string) => void;
+  onLayerRotate?: (axis: 'x' | 'y' | 'z', layer: number, clockwise: boolean) => void;
+  onInteractionStatusChange?: (isInteracting: boolean) => void;
 }
 
 const SIZE = 1.0;
@@ -22,156 +24,38 @@ const colorMap: Record<Color, string> = {
   green: '#00ff00',
 };
 
-// Simplified piece representation
-export function Piece({ position, colors, onRotate }: { 
-  position: [number, number, number], 
-  colors: Record<string, Color | null>, 
-  onRotate?: (face: string) => void 
-}) {
-  const meshRef = useRef<THREE.Group>(null);
-  const pointerDownRef = useRef<{ x: number, y: number, face: string } | null>(null);
-
-  const materials = useMemo(() => {
-    // 0: right, 1: left, 2: top, 3: bottom, 4: front, 5: back
-    const order: string[] = ['right', 'left', 'top', 'bottom', 'front', 'back'];
-    return order.map(side => (
-      <meshStandardMaterial 
-        key={side} 
-        attach={`material-${order.indexOf(side)}`} 
-        color={colors[side] ? colorMap[colors[side] as Color] : '#111111'} 
-        roughness={0.1}
-        metalness={0.1}
-      />
-    ));
-  }, [colors]);
-
-  return (
-    <group 
-      position={position} 
-      ref={meshRef}
-      onPointerDown={(e) => {
-        e.stopPropagation();
-        if (e.face) {
-          const normal = e.face.normal;
-          let face = '';
-          if (normal.z > 0.5) face = 'front';
-          else if (normal.z < -0.5) face = 'back';
-          else if (normal.y > 0.5) face = 'top';
-          else if (normal.y < -0.5) face = 'bottom';
-          else if (normal.x > 0.5) face = 'right';
-          else if (normal.x < -0.5) face = 'left';
-          pointerDownRef.current = { x: e.clientX, y: e.clientY, face };
-        }
-      }}
-      onPointerUp={(e) => {
-        e.stopPropagation();
-        if (!pointerDownRef.current) return;
-
-        const dx = e.clientX - pointerDownRef.current.x;
-        const dy = e.clientY - pointerDownRef.current.y;
-        const absX = Math.abs(dx);
-        const absY = Math.abs(dy);
-        const distance = Math.sqrt(dx * dx + dy * dy);
-
-        if (distance < 10) {
-          // It's a tap - just rotate the face clicked
-          const face = pointerDownRef.current.face;
-          if (face) onRotate?.(face);
-        } else if (distance > 30) {
-          // It's a swipe/flick - rotate the layer
-          const startFace = pointerDownRef.current.face;
-          const [px, py, pz] = [Math.round(position[0]/(SIZE+GAP)), Math.round(position[1]/(SIZE+GAP)), Math.round(position[2]/(SIZE+GAP))];
-          
-          if (startFace === 'front') {
-            if (absX > absY) { // Horizontal
-              if (py === 1) onRotate?.('top');
-              else if (py === -1) onRotate?.('bottom');
-              else onRotate?.('front');
-            } else { // Vertical
-              if (px === -1) onRotate?.('left');
-              else if (px === 1) onRotate?.('right');
-              else onRotate?.('front');
-            }
-          } else if (startFace === 'back') {
-            if (absX > absY) {
-              if (py === 1) onRotate?.('top');
-              else if (py === -1) onRotate?.('bottom');
-              else onRotate?.('back');
-            } else {
-              if (px === -1) onRotate?.('right'); // flipped for back
-              else if (px === 1) onRotate?.('left');
-              else onRotate?.('back');
-            }
-          } else if (startFace === 'top') {
-            if (absX > absY) {
-              if (pz === -1) onRotate?.('back');
-              else if (pz === 1) onRotate?.('front');
-              else onRotate?.('top');
-            } else {
-              if (px === -1) onRotate?.('left');
-              else if (px === 1) onRotate?.('right');
-              else onRotate?.('top');
-            }
-          } else if (startFace === 'bottom') {
-            if (absX > absY) {
-              if (pz === -1) onRotate?.('back');
-              else if (pz === 1) onRotate?.('front');
-              else onRotate?.('bottom');
-            } else {
-              if (px === -1) onRotate?.('left');
-              else if (px === 1) onRotate?.('right');
-              else onRotate?.('bottom');
-            }
-          } else if (startFace === 'left') {
-            if (absX > absY) {
-              if (pz === -1) onRotate?.('back');
-              else if (pz === 1) onRotate?.('front');
-              else onRotate?.('left');
-            } else {
-              if (py === 1) onRotate?.('top');
-              else if (py === -1) onRotate?.('bottom');
-              else onRotate?.('left');
-            }
-          } else if (startFace === 'right') {
-            if (absX > absY) {
-              if (pz === -1) onRotate?.('back');
-              else if (pz === 1) onRotate?.('front');
-              else onRotate?.('right');
-            } else {
-              if (py === 1) onRotate?.('top');
-              else if (py === -1) onRotate?.('bottom');
-              else onRotate?.('right');
-            }
-          }
-        }
-        pointerDownRef.current = null;
-      }}
-    >
-      <mesh>
-        <boxGeometry args={[SIZE, SIZE, SIZE]} />
-        {materials}
-      </mesh>
-      {/* Black borders for individual cublets */}
-      <mesh>
-        <boxGeometry args={[SIZE + 0.01, SIZE + 0.01, SIZE + 0.01]} />
-        <meshBasicMaterial color="#000000" wireframe />
-      </mesh>
-    </group>
-  );
-}
-
-export function RubiksCube({ cubeState, trickActive, onFaceHidden, onRotate }: RubiksCubeProps & { onRotate?: (face: FaceName) => void }) {
+export function RubiksCube({ 
+  cubeState, 
+  trickActive, 
+  onFaceHidden, 
+  onLayerRotate,
+  onInteractionStatusChange 
+}: RubiksCubeProps) {
   const groupRef = useRef<THREE.Group>(null);
+  const [rotationGroup, setRotationGroup] = useState<{
+    pieces: string[];
+    axis: THREE.Vector3;
+    angle: number;
+    axisLabel: 'x' | 'y' | 'z';
+    layer: number;
+  } | null>(null);
 
-  // Generate pieces based on cubeState
-  const pieces = useMemo(() => {
+  const interactionRef = useRef({
+    isDragging: false,
+    startPos: { x: 0, y: 0 },
+    currentPieceId: null as string | null,
+    startFace: null as string | null,
+    hasDeterminedAxis: false,
+  });
+
+  // Generate pieces data
+  const piecesData = useMemo(() => {
     const result = [];
     for (let x = -1; x <= 1; x++) {
       for (let y = -1; y <= 1; y++) {
         for (let z = -1; z <= 1; z++) {
           if (x === 0 && y === 0 && z === 0) continue;
 
-          // Mapping logic for standard Rubik's cube grid
           const colors: Record<string, Color | null> = {
             front: z === 1 ? cubeState.front.colors[1 - y][x + 1] : null,
             back: z === -1 ? cubeState.back.colors[1 - y][1 - x] : null,
@@ -182,7 +66,8 @@ export function RubiksCube({ cubeState, trickActive, onFaceHidden, onRotate }: R
           };
 
           result.push({
-            id: `${x}${y}${z}`,
+            id: `${x},${y},${z}`,
+            gridPos: [x, y, z] as [number, number, number],
             pos: [x * (SIZE + GAP), y * (SIZE + GAP), z * (SIZE + GAP)] as [number, number, number],
             colors
           });
@@ -192,14 +77,145 @@ export function RubiksCube({ cubeState, trickActive, onFaceHidden, onRotate }: R
     return result;
   }, [cubeState]);
 
-  // Check visibility for the "Trick"
+  const materials = useMemo(() => {
+    const order: string[] = ['right', 'left', 'top', 'bottom', 'front', 'back'];
+    return (colors: Record<string, Color | null>) => {
+      return order.map(side => (
+        <meshStandardMaterial 
+          key={side} 
+          attach={`material-${order.indexOf(side)}`} 
+          color={colors[side] ? colorMap[colors[side] as Color] : '#111111'} 
+          roughness={0.1}
+          metalness={0.1}
+        />
+      ));
+    };
+  }, []);
+
+  const handlePointerDown = (e: any, pieceId: string, face: string) => {
+    e.stopPropagation();
+    interactionRef.current = {
+      isDragging: true,
+      startPos: { x: e.clientX, y: e.clientY },
+      currentPieceId: pieceId,
+      startFace: face,
+      hasDeterminedAxis: false,
+    };
+    onInteractionStatusChange?.(true);
+  };
+
+  const handlePointerMove = (e: any) => {
+    if (!interactionRef.current.isDragging) return;
+    const { startPos, currentPieceId, startFace, hasDeterminedAxis } = interactionRef.current;
+    
+    const dx = e.clientX - startPos.x;
+    const dy = e.clientY - startPos.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (!hasDeterminedAxis && dist > 15) {
+      const coord = currentPieceId!.split(',').map(Number);
+      const px = coord[0], py = coord[1], pz = coord[2];
+      const absX = Math.abs(dx);
+      const absY = Math.abs(dy);
+      
+      let axisLabel: 'x' | 'y' | 'z' | null = null;
+      let layer = 0;
+      let rotationAxis = new THREE.Vector3();
+
+      if (startFace === 'front' || startFace === 'back') {
+        if (absX > absY) {
+          axisLabel = 'y'; layer = py; rotationAxis.set(0, 1, 0);
+        } else {
+          axisLabel = 'x'; layer = px; rotationAxis.set(1, 0, 0);
+        }
+      } else if (startFace === 'top' || startFace === 'bottom') {
+        if (absX > absY) {
+          axisLabel = 'z'; layer = pz; rotationAxis.set(0, 0, 1);
+        } else {
+          axisLabel = 'x'; layer = px; rotationAxis.set(1, 0, 0);
+        }
+      } else if (startFace === 'left' || startFace === 'right') {
+        if (absX > absY) {
+          axisLabel = 'z'; layer = pz; rotationAxis.set(0, 0, 1);
+        } else {
+          axisLabel = 'y'; layer = py; rotationAxis.set(0, 1, 0);
+        }
+      }
+
+      if (axisLabel !== null) {
+        interactionRef.current.hasDeterminedAxis = true;
+        const layerPieces: string[] = piecesData
+          .filter(p => {
+            if (axisLabel === 'x') return p.gridPos[0] === layer;
+            if (axisLabel === 'y') return p.gridPos[1] === layer;
+            if (axisLabel === 'z') return p.gridPos[2] === layer;
+            return false;
+          })
+          .map(p => p.id);
+
+        setRotationGroup({
+          pieces: layerPieces,
+          axis: rotationAxis,
+          angle: 0,
+          axisLabel,
+          layer
+        });
+      }
+    }
+
+    if (interactionRef.current.hasDeterminedAxis && rotationGroup) {
+      const dragFactor = 0.015;
+      let angleDelta = (Math.abs(dx) > Math.abs(dy) ? dx : -dy) * dragFactor;
+      
+      // Fine-tune directions based on face
+      if (rotationGroup.axisLabel === 'y' && startFace === 'back') angleDelta *= -1;
+      if (rotationGroup.axisLabel === 'z' && startFace === 'top') angleDelta *= -1;
+      if (rotationGroup.axisLabel === 'x' && startFace === 'top') angleDelta *= -1;
+      if (rotationGroup.axisLabel === 'z' && startFace === 'left') angleDelta *= -1;
+
+      setRotationGroup(prev => prev ? { ...prev, angle: angleDelta } : null);
+    }
+  };
+
+  const handlePointerUp = () => {
+    if (interactionRef.current.isDragging) {
+      if (rotationGroup && Math.abs(rotationGroup.angle) > 0.4) {
+        let clockwise = rotationGroup.angle < 0;
+        
+        // Final normalization to match target clockwise behavior in utils.ts
+        if (rotationGroup.axisLabel === 'x') {
+           if (interactionRef.current.startFace === 'top') clockwise = rotationGroup.angle > 0;
+           if (interactionRef.current.startFace === 'front') clockwise = rotationGroup.angle > 0;
+        }
+        if (rotationGroup.axisLabel === 'z') {
+           if (interactionRef.current.startFace === 'top') clockwise = rotationGroup.angle > 0;
+           if (interactionRef.current.startFace === 'left') clockwise = rotationGroup.angle > 0;
+        }
+        if (rotationGroup.axisLabel === 'y') {
+           clockwise = rotationGroup.angle > 0;
+        }
+
+        onLayerRotate?.(rotationGroup.axisLabel, rotationGroup.layer, clockwise);
+      }
+      interactionRef.current.isDragging = false;
+      setRotationGroup(null);
+      onInteractionStatusChange?.(false);
+    }
+  };
+
+  useEffect(() => {
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+  }, [rotationGroup, piecesData]);
+
   useFrame((state) => {
     if (!trickActive || !groupRef.current) return;
-
     const cameraDirection = new THREE.Vector3();
     state.camera.getWorldDirection(cameraDirection);
-
-    // Faces normals in local space
     const faceNormals: Record<FaceName, THREE.Vector3> = {
       front: new THREE.Vector3(0, 0, 1),
       back: new THREE.Vector3(0, 0, -1),
@@ -208,29 +224,58 @@ export function RubiksCube({ cubeState, trickActive, onFaceHidden, onRotate }: R
       left: new THREE.Vector3(-1, 0, 0),
       right: new THREE.Vector3(1, 0, 0),
     };
-
-    // Transform local normals to world normals
     Object.entries(faceNormals).forEach(([name, localNormal]) => {
       const worldNormal = localNormal.clone().applyQuaternion(groupRef.current!.quaternion);
-      const dot = worldNormal.dot(cameraDirection.negate()); // Vector towards camera
-      
-      // If the face is facing away from camera (dot <= 0), trigger hidden update
-      if (dot <= 0) {
-        onFaceHidden?.(name);
-      }
+      const dot = worldNormal.dot(cameraDirection.negate());
+      if (dot < -0.4) onFaceHidden?.(name);
     });
   });
 
   return (
-    <group ref={groupRef}>
-      {pieces.map(p => (
-        <Piece 
-          key={p.id} 
-          position={p.pos} 
-          colors={p.colors} 
-          onRotate={(face) => onRotate?.(face as FaceName)} 
-        />
-      ))}
+    <group ref={groupRef} name="rubiks-cube-group">
+      {piecesData.map(p => {
+        const isRotating = rotationGroup?.pieces.includes(p.id);
+        
+        let dynamicPos = p.pos;
+        let dynamicQuat = new THREE.Quaternion();
+        
+        if (isRotating && rotationGroup) {
+          dynamicQuat.setFromAxisAngle(rotationGroup.axis, rotationGroup.angle);
+          const vPos = new THREE.Vector3(...p.pos);
+          vPos.applyQuaternion(dynamicQuat);
+          dynamicPos = [vPos.x, vPos.y, vPos.z];
+        }
+
+        return (
+          <group 
+            key={p.id} 
+            position={dynamicPos} 
+            quaternion={dynamicQuat}
+            onPointerDown={(e) => {
+              const normal = e.face?.normal;
+              if (normal) {
+                let face = '';
+                if (normal.z > 0.5) face = 'front';
+                else if (normal.z < -0.5) face = 'back';
+                else if (normal.y > 0.5) face = 'top';
+                else if (normal.y < -0.5) face = 'bottom';
+                else if (normal.x > 0.5) face = 'right';
+                else if (normal.x < -0.5) face = 'left';
+                handlePointerDown(e, p.id, face);
+              }
+            }}
+          >
+            <mesh>
+              <boxGeometry args={[SIZE, SIZE, SIZE]} />
+              {materials(p.colors)}
+            </mesh>
+            <mesh>
+              <boxGeometry args={[SIZE + 0.01, SIZE + 0.01, SIZE + 0.01]} />
+              <meshBasicMaterial color="#000000" wireframe />
+            </mesh>
+          </group>
+        );
+      })}
     </group>
   );
 }

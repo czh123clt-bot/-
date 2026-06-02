@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { RubiksCube } from './components/RubiksCube';
 import { SettingsModal } from './components/SettingsModal';
 import { createSolvedCube, CubeState, FaceName } from './types';
-import { rotateFace } from './utils';
+import { rotateFace, rotateLayer } from './utils';
 
 function TrickDetector({ onFrontDetected }: { onFrontDetected: (face: FaceName) => void }) {
   const { camera } = useThree();
@@ -19,6 +19,9 @@ function TrickDetector({ onFrontDetected }: { onFrontDetected: (face: FaceName) 
       camera.getWorldDirection(dir);
       dir.negate(); // Dir towards camera from center
 
+      const cubeGroup = camera.parent?.getObjectByName('rubiks-cube-group');
+      const quat = cubeGroup ? cubeGroup.quaternion : new THREE.Quaternion();
+
       const faces: Record<FaceName, THREE.Vector3> = {
         front: new THREE.Vector3(0, 0, 1),
         back: new THREE.Vector3(0, 0, -1),
@@ -29,9 +32,10 @@ function TrickDetector({ onFrontDetected }: { onFrontDetected: (face: FaceName) 
       };
 
       const visible: FaceName[] = [];
-      Object.entries(faces).forEach(([name, vec]) => {
-        const dot = vec.dot(dir);
-        if (dot > 0) { // Any face with positive dot product is mathematically oriented toward the camera
+      Object.entries(faces).forEach(([name, localVec]) => {
+        const worldVec = localVec.clone().applyQuaternion(quat);
+        const dot = worldVec.dot(dir);
+        if (dot > -0.2) { // Extremely generous threshold: if it's even slightly facing the camera, don't swap it
           visible.push(name as FaceName);
         }
       });
@@ -51,8 +55,11 @@ export default function App() {
   const [frozenFaces, setFrozenFaces] = useState<FaceName[]>([]);
   const [showHint, setShowHint] = useState(true);
 
-  const handleRotate = (face: FaceName) => {
-    setCubeState(prev => rotateFace(prev, face));
+  const [isInteracting, setIsInteracting] = useState(false);
+  const orbitalControlsRef = useRef<any>(null);
+
+  const handleLayerRotate = (axis: 'x' | 'y' | 'z', layer: number, clockwise: boolean = true) => {
+    setCubeState(prev => rotateLayer(prev, axis, layer, clockwise));
   };
 
   const triggerTrick = useCallback(() => {
@@ -78,12 +85,15 @@ export default function App() {
 
   const handleFaceHidden = useCallback((faceName: string) => {
     if (isTrickActive) {
-      setCubeState(prev => ({
-        ...prev,
-        [faceName]: presetState[faceName as FaceName]
-      }));
-
       setFrozenFaces(prev => {
+        if (!prev.includes(faceName as FaceName)) return prev;
+
+        // Face was visible, now it's hidden - update its state to solved
+        setCubeState(curr => ({
+          ...curr,
+          [faceName]: presetState[faceName as FaceName]
+        }));
+
         const next = prev.filter(f => f !== faceName);
         if (next.length === 0) {
           setIsTrickActive(false);
@@ -111,28 +121,35 @@ export default function App() {
         <Canvas shadows gl={{ antialias: true, alpha: true }} touch-action="none">
           <PerspectiveCamera makeDefault position={[0, 0, 18]} fov={30} />
           <OrbitControls 
+            ref={orbitalControlsRef}
+            enabled={!isInteracting}
             enablePan={false} 
             minDistance={10} 
             maxDistance={25}
-            autoRotate={!isTrickActive && !isSettingsOpen}
+            autoRotate={false}
             autoRotateSpeed={0.4}
             target={[0, 0, 0]}
             makeDefault
           />
-          <ambientLight intensity={1.2} />
-          <pointLight position={[10, 10, 10]} intensity={1.8} />
+          <ambientLight intensity={1.5} />
+          <pointLight position={[10, 10, 10]} intensity={2} />
+          <pointLight position={[-10, -10, -10]} intensity={1} color="#444" />
           <Suspense fallback={null}>
             <Center>
               <RubiksCube 
                 cubeState={cubeState} 
                 trickActive={isTrickActive}
                 onFaceHidden={handleFaceHidden}
-                onRotate={handleRotate}
+                onLayerRotate={handleLayerRotate}
+                onInteractionStatusChange={setIsInteracting}
               />
             </Center>
             <ContactShadows opacity={0.3} scale={10} blur={4} far={10} verticalOffset={-1.5} />
-            <Environment preset="city" />
             <TrickDetector onFrontDetected={() => {}} />
+          </Suspense>
+          {/* Environment loaded separately to avoid blocking the main view if it's slow */}
+          <Suspense fallback={null}>
+            <Environment preset="city" />
           </Suspense>
         </Canvas>
       </div>
@@ -140,13 +157,14 @@ export default function App() {
       {/* Main Layout Overlay */}
       <div className="relative flex-1 flex flex-col z-10 pointer-events-none">
         
-        {/* Settings button in a more discrete location if needed, but removing header as requested */}
-        <div className="absolute top-8 right-8 pointer-events-auto">
+        {/* Settings area - visually hidden but functional */}
+        <div className="absolute top-0 right-0 w-32 h-32 pointer-events-auto">
           <button 
             onClick={() => setIsSettingsOpen(true)}
-            className="p-2.5 bg-white/5 border border-white/5 rounded-xl text-zinc-500 hover:text-white transition-all active:scale-95 backdrop-blur-sm"
+            className="w-full h-full opacity-0 cursor-default"
+            aria-label="Settings"
           >
-            <Settings size={18} />
+            <Settings size={1} />
           </button>
         </div>
 
