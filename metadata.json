@@ -1,0 +1,8 @@
+{
+  "name": "魔方实验室",
+  "description": "一个可交互的3D魔方应用，带有可自定义的变换魔术功能。",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
