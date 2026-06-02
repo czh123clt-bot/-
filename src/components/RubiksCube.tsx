@@ -214,8 +214,8 @@ export function RubiksCube({ cubeState, trickActive, onFaceHidden, onRotate }: R
       const worldNormal = localNormal.clone().applyQuaternion(groupRef.current!.quaternion);
       const dot = worldNormal.dot(cameraDirection.negate()); // Vector towards camera
       
-      // If the face is facing away from camera (dot < 0), trigger hidden update
-      if (dot < -0.1) {
+      // If the face is facing away from camera (dot <= 0), trigger hidden update
+      if (dot <= 0) {
         onFaceHidden?.(name);
       }
     });
